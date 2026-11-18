@@ -1,0 +1,17 @@
+name: Benchmark / performance report
+description: Share (or question) a speedup or slowdown on your hardware
+labels: [performance]
+body:
+  - type: markdown
+    attributes:
+      value: Please run `python -m unimol_accel.bench --preset standard` and attach the generated `results-*.json`.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary of what you saw
+    validations: {required: true}
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU model and core count
+    validations: {required: true}

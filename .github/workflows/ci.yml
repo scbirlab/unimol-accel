@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    name: py${{ matrix.python }} · unimol-tools ${{ matrix.upstream }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        upstream: ["release"]
+        experimental: [false]
+        include:
+          - {python: "3.15", upstream: "release", experimental: true}   # newest CPython; non-blocking until its wheels settle
+          # canary for upstream drift: the unverified-hash path must fall back safely, so tests are expected to pass
+          # either way, but a failure here tells maintainers that a new hash needs reviewing.
+          - {python: "3.12", upstream: "main", experimental: true}
+          - {python: "3.12", upstream: "0.1.3.post1", experimental: true}   # older release the hashes were also verified on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+          cache: pip
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install upstream
+        run: |
+          if [ "${{ matrix.upstream }}" = "main" ]; then
+            pip install "unimol-tools @ git+https://github.com/deepmodeling/Uni-Mol.git#subdirectory=unimol_tools"
+          elif [ "${{ matrix.upstream }}" = "release" ]; then
+            pip install "unimol-tools>=0.1.6"
+          else
+            pip install "unimol-tools==${{ matrix.upstream }}"
+          fi
+      - name: Install unimol-accel
+        run: pip install pytest pytest-cov -e ".[test]"
+      - name: Show environment
+        run: |
+          pip list | grep -iE "^(torch|unimol-tools|rdkit|numpy|unimol-accel) "
+          python -m unimol_accel status
+      - name: Tests
+        run: pytest -q --ignore=tests/integration
+
+  aspect-integration:
+    name: scbirlab/aspect integration (py3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install "aspect-data[unimol]" pytest
+      - run: pip install -e ".[test]"
+      - name: Integration tests (random weights, mocked Hugging Face hub; no network needed)
+        run: pytest -q tests/integration
+
+  test-other-os:
+    name: ${{ matrix.os }} · py3.12
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - name: Install CPU PyTorch (Linux/Windows)
+        if: runner.os != 'macOS'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install PyTorch (macOS)
+        if: runner.os == 'macOS'
+        run: pip install torch
+      - run: pip install "unimol-tools>=0.1.6" pytest
+      - run: pip install -e ".[test]"
+      - run: python -m unimol_accel status
+      - run: pytest -q -x --ignore=tests/integration
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install build twine
+      - name: Build sdist and wheel (pure Python; no torch needed)
+        run: python -m build
+      - run: twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with: {name: dist, path: dist/*}

@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unimol-accel"
+dynamic = ["version"]
+description = "Drop-in CPU acceleration for Uni-Mol (unimol_tools), activated by a single import."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Eachan Johnson" }]
+keywords = ["pytorch", "cheminformatics", "performance", "molecular representation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = ["torch>=2.1"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "unimol-tools>=0.1.6", "rdkit", "addict", "numba", "scikit-learn", "pandas", "joblib", "pyyaml", "tqdm"]
+docs = [
+  "sphinx>=7.3",
+  "pydata-sphinx-theme>=0.15",
+  "myst-parser>=3",
+  "sphinx-copybutton",
+  "sphinx-design",
+]
+dev = ["unimol-accel[test,docs]", "ruff", "build"]
+
+[project.scripts]
+unimol-accel-bench = "unimol_accel.bench.__main__:main"
+unimol-accel-report = "unimol_accel.bench.report:main"
+
+[project.urls]
+Homepage = "https://github.com/scbirlab/unimol-accel"
+Documentation = "https://scbirlab.github.io/unimol-accel/"
+Issues = "https://github.com/scbirlab/unimol-accel/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "unimol_accel.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["experiments"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501", "B905", "E402", "E741", "E731", "B028", "UP035", "UP006", "UP007", "UP045", "I001"]
