@@ -60,7 +60,7 @@ jobs:
         if: runner.os == 'macOS'
         run: pip install torch
       - run: pip install "unimol-tools>=0.1.6"
-      - run: pip install -e .
+      - run: pip install -e ".[bench]"
       - run: python -m unimol_accel status
       - name: Benchmark (speed + equivalence; offline, random weights)
         shell: bash

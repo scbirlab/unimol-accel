@@ -28,6 +28,7 @@ from pathlib import Path
 
 SCHEMA = 1
 PACKAGE = "unimol_accel"
+DIST = "unimol-accel"
 
 PRESETS = {
     "quick": dict(
@@ -175,6 +176,16 @@ def main(argv=None) -> int:
 
         if not torch.cuda.is_available():
             print("CUDA requested but not available", file=sys.stderr)
+            return 2
+    if not a.dry_run:
+        try:
+            import rdkit  # noqa: F401
+        except ImportError:
+            print(
+                "The benchmark builds molecules/conformers from SMILES and needs RDKit: "
+                f'pip install "{DIST}[bench]"  (or: pip install rdkit)',
+                file=sys.stderr,
+            )
             return 2
     avail = os.cpu_count() or 1
     plan = build_plan(a, avail)

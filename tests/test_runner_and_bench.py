@@ -95,3 +95,22 @@ def test_report_renders_from_synthetic_results(tmp_path):
     bad = dict(doc, equivalence=[{"key": "k", "passed": False}])
     assert "EQUIVALENCE FAILURES" in render([bad])
     assert write_report([doc], tmp_path / "r.html").read_text().startswith("<!doctype html>")
+
+
+def test_bench_without_rdkit_fails_with_install_hint(monkeypatch, capsys):
+    """CI regression: a bare ``pip install -e .`` has no RDKit; say so instead of failing every run."""
+    import builtins
+
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "rdkit":
+            raise ImportError("no rdkit")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    from importlib import import_module
+
+    mod = import_module("unimol_accel.bench.__main__")
+    assert mod.main(["--preset", "ci", "--output", "/tmp/_x_bench"]) == 2
+    assert "RDKit" in capsys.readouterr().err

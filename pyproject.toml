@@ -21,6 +21,7 @@ classifiers = [
 dependencies = ["torch>=2.1"]
 
 [project.optional-dependencies]
+bench = ["rdkit"]   # the benchmark builds its conformers from SMILES
 test = ["pytest>=8", "unimol-tools>=0.1.6", "rdkit", "addict", "numba", "scikit-learn", "pandas", "joblib", "pyyaml", "tqdm"]
 docs = [
   "sphinx>=7.3",

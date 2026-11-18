@@ -6,6 +6,7 @@ import json
 import statistics
 import sys
 import time
+import warnings
 
 
 def _sync(torch, device):
@@ -26,6 +27,8 @@ def _no_dropout(model):
 
 
 def main() -> int:
+    # third-party import-time deprecation noise (e.g. torch.jit.script via e3nn) would flood CI logs
+    warnings.filterwarnings("ignore", category=FutureWarning)
     cfg = json.loads(sys.argv[1])
     import torch
 
