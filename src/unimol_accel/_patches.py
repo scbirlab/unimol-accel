@@ -13,9 +13,12 @@ Every patch is
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 import hashlib
 import inspect
+import math
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
@@ -188,17 +191,99 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+@dataclasses.dataclass(frozen=True)
+class CostModel:
+    """Heuristic cost of one padded sub-batch: ``n * (L + pair_weight * L^2) + group_overhead * L``.
+
+    ``L`` is the longest member, ``n`` the group size. The partition chosen by :func:`plan_buckets` is optimal
+    for *this* function, not necessarily for measured run time, so the constants are tunable (environment
+    variables below) and ``benchmarks/calibrate_cost_model.py`` fits them to the machine it runs on.
+    """
+
+    pair_weight: float = (
+        1.0 / 16.0
+    )  # UNIMOL_ACCEL_COST_PAIR: weight of the L^2 (pair) term relative to L
+    group_overhead: float = (
+        48.0  # UNIMOL_ACCEL_COST_GROUP: fixed cost of an extra group, in units of L
+    )
+    min_group: int = 4  # UNIMOL_ACCEL_COST_MIN_GROUP: smallest group (except the longest one)
+    min_saving: float = (
+        0.10  # UNIMOL_ACCEL_COST_MIN_SAVING: only bucket if the plan saves at least this fraction
+    )
+
+    @classmethod
+    def from_env(cls) -> CostModel:
+        """Read the constants from the environment; invalid values (NaN, inf, negative, out of range) are
+        rejected with a warning and replaced by the default rather than silently accepted."""
+        d = cls()
+
+        def pick(name, default, ok, cast):
+            raw = os.environ.get(name)
+            if raw is None:
+                return default
+            try:
+                v = cast(raw)
+                if ok(v):
+                    return v
+            except ValueError:
+                pass
+            warnings.warn(f"{name}={raw!r} is not valid; using the default {default}", stacklevel=3)
+            return default
+
+        finite_nonneg = lambda v: math.isfinite(v) and v >= 0.0  # noqa: E731
+        return cls(
+            pair_weight=pick("UNIMOL_ACCEL_COST_PAIR", d.pair_weight, finite_nonneg, float),
+            group_overhead=pick("UNIMOL_ACCEL_COST_GROUP", d.group_overhead, finite_nonneg, float),
+            min_group=pick("UNIMOL_ACCEL_COST_MIN_GROUP", d.min_group, lambda v: v >= 1, int),
+            min_saving=pick(
+                "UNIMOL_ACCEL_COST_MIN_SAVING",
+                d.min_saving,
+                lambda v: math.isfinite(v) and 0.0 <= v < 1.0,
+                float,
+            ),
+        )
+
+    def group_cost(self, n: int, L: int) -> float:
+        return n * (L + self.pair_weight * L * L) + self.group_overhead * L
+
+    def plan_cost(self, groups, lengths) -> float:
+        """Total cost of a plan (including each group's overhead), in the same units as the planner optimises."""
+        return sum(self.group_cost(len(g), max(lengths[i] for i in g)) for g in groups)
+
+
 def plan_buckets(
     lengths: List[int],
-    min_group: int = 4,
-    group_overhead: float = 48.0,
-    pair_weight: float = 1.0 / 16.0,
+    min_group: Optional[int] = None,
+    group_overhead: Optional[float] = None,
+    pair_weight: Optional[float] = None,
+    cost: Optional[CostModel] = None,
 ) -> List[List[int]]:
     """Partition molecule indices (sorted by length) into groups minimising padded cost.
 
-    cost(group) = n * (L + pair_weight * L^2) + group_overhead * L, with L the longest member.
-    Returns groups of *original indices*, each sorted by length. Optimal by dynamic programming.
+    ``cost`` (default: :meth:`CostModel.from_env`) defines ``cost(group) = n*(L + pair_weight*L^2) +
+    group_overhead*L`` with L the longest member; the individual keyword arguments override single fields.
+    Returns groups of *original indices*, each sorted by length. Optimal for that cost by dynamic programming.
     """
+    cm = cost or CostModel.from_env()
+    cm = dataclasses.replace(
+        cm,
+        **{
+            k: v
+            for k, v in (
+                ("min_group", min_group),
+                ("group_overhead", group_overhead),
+                ("pair_weight", pair_weight),
+            )
+            if v is not None
+        },
+    )
     order = sorted(range(len(lengths)), key=lambda i: lengths[i])
     ls = [lengths[i] for i in order]
     n = len(ls)
@@ -209,10 +294,10 @@ def plan_buckets(
     for end in range(1, n + 1):
         L = ls[end - 1]
         for start in range(max(0, end - 256), end):
-            if end - start < min_group and not (start == 0 and end == n):
+            if end - start < cm.min_group and not (start == 0 and end == n):
                 if end != n:  # only the final (longest) group may be smaller than min_group
                     continue
-            c = best[start] + (end - start) * (L + pair_weight * L * L) + group_overhead * L
+            c = best[start] + cm.group_cost(end - start, L)
             if c < best[end]:
                 best[end], cut[end] = c, start
     groups, end = [], n
@@ -222,6 +307,17 @@ def plan_buckets(
         end = start
     groups.reverse()
     return groups
+
+
+def worth_splitting(groups, lengths, B: int, L: int, cm: CostModel) -> bool:
+    """Accept a split only if the *full* cost model predicts a saving of at least ``min_saving``.
+
+    Same objective the planner optimises (every group pays its overhead), compared with running the whole batch
+    as one group padded to ``L``.
+    """
+    if len(groups) <= 1:
+        return False
+    return cm.plan_cost(groups, lengths) <= (1.0 - cm.min_saving) * cm.group_cost(B, L)
 
 
 _UNMERGEABLE = object()
@@ -302,7 +398,7 @@ def _make_unimol_forward(original):
             )
         min_batch = _env_int("UNIMOL_ACCEL_BUCKET_MIN_BATCH", 8)
         bucket = os.environ.get("UNIMOL_ACCEL_BUCKET", "1") != "0"
-        train_ok = os.environ.get("UNIMOL_ACCEL_BUCKET_TRAIN", "1") == "1"
+        train_ok = os.environ.get("UNIMOL_ACCEL_BUCKET_TRAIN", "0") == "1"  # opt-in: see README
         token = _SKIP_TAIL.set(True)
         try:
             B = src_tokens.size(0)
@@ -324,13 +420,11 @@ def _make_unimol_forward(original):
                 )
             L = src_tokens.size(1)
             lengths = (src_tokens != self.padding_idx).sum(1).tolist()
-            groups = plan_buckets(lengths)
-            padded_cost = B * (L + L * L / 16.0)
-            planned = sum(
-                len(g) * (max(lengths[i] for i in g) + max(lengths[i] for i in g) ** 2 / 16.0)
-                for g in groups
-            )
-            if len(groups) == 1 or planned > 0.9 * padded_cost:
+            cm = CostModel.from_env()
+            groups = plan_buckets(lengths, cost=cm)
+            # accept a split only if the *full* cost model (overhead of every group included, as in the planner)
+            # predicts the saving, relative to running everything as one padded group
+            if not worth_splitting(groups, lengths, B, L, cm):
                 return original(
                     self,
                     src_tokens,

@@ -28,5 +28,9 @@ original path rather than guessing.
 | --- | --- |
 | `UNIMOL_ACCEL_DISABLE=1` | don't activate on import |
 | `UNIMOL_ACCEL_BUCKET=0` | no length bucketing |
-| `UNIMOL_ACCEL_BUCKET_TRAIN=0` | no bucketing in training (default: on; dropout masks then differ from the original under the same seed) |
+| `UNIMOL_ACCEL_BUCKET_TRAIN=1` | **opt-in:** bucket in training too (default: off; dropout masks are then drawn per sub-batch and trajectories differ from the original under the same seed) |
 | `UNIMOL_ACCEL_BUCKET_MIN_BATCH` | smallest batch that is bucketed (default 8) |
+| `UNIMOL_ACCEL_COST_PAIR` | cost model: weight of the L² term (default 0.0625) |
+| `UNIMOL_ACCEL_COST_GROUP` | cost model: per-group overhead in units of L (default 48) |
+| `UNIMOL_ACCEL_COST_MIN_GROUP` | smallest group except the longest (default 4) |
+| `UNIMOL_ACCEL_COST_MIN_SAVING` | only bucket if the plan saves at least this fraction of padded cost (default 0.10) |

@@ -8,6 +8,7 @@ Set ``UNIMOL_ACCEL_DISABLE=1`` to prevent automatic activation.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from typing import Dict, List
 
@@ -62,6 +63,19 @@ def status() -> Dict:
             p.name: ("active" if p.applied else f"inactive: {p.reason or 'not applied'}")
             for p in _active
         },
+        "bucketing": _bucketing_settings(),
+    }
+
+
+def _bucketing_settings() -> Dict:
+    from . import _patches as P
+
+    cm = P.CostModel.from_env()
+    return {
+        "inference": os.environ.get("UNIMOL_ACCEL_BUCKET", "1") != "0",
+        "training": os.environ.get("UNIMOL_ACCEL_BUCKET_TRAIN", "0") == "1",  # opt-in
+        "min_batch": P._env_int("UNIMOL_ACCEL_BUCKET_MIN_BATCH", 8),
+        "cost_model": dataclasses.asdict(cm),
     }
 
 

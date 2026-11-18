@@ -32,7 +32,7 @@ DIST = "unimol-accel"
 
 PRESETS = {
     "quick": dict(
-        kinds=["inference", "train", "grad-check"],
+        kinds=["inference", "train", "train-bucketed", "grad-check"],
         batch=[8, 32],
         train_batch=[8, 32],
         threads=["all"],
@@ -40,7 +40,7 @@ PRESETS = {
         check_batch=8,
     ),
     "standard": dict(
-        kinds=["inference", "train", "grad-check"],
+        kinds=["inference", "train", "train-bucketed", "grad-check"],
         batch=[4, 8, 16, 32, 48],
         train_batch=[8, 32],
         threads=["1", "all"],
@@ -48,7 +48,7 @@ PRESETS = {
         check_batch=8,
     ),
     "ci": dict(
-        kinds=["inference", "train", "grad-check"],
+        kinds=["inference", "train", "train-bucketed", "grad-check"],
         batch=[16, 32],
         train_batch=[16],
         threads=["all"],
@@ -117,7 +117,7 @@ def build_plan(a, avail):
     for kind in p["kinds"]:
         batches = (
             p["train_batch"]
-            if kind in ("train",) and "train_batch" in p and not a.batch
+            if kind in ("train", "train-bucketed") and "train_batch" in p and not a.batch
             else p["batch"]
         )
         if kind == "grad-check":
@@ -159,7 +159,9 @@ def main(argv=None) -> int:
         prog=f"python -m {PACKAGE}.bench", description=__doc__.split("\n\n")[0]
     )
     ap.add_argument("--preset", choices=PRESETS, default="quick")
-    ap.add_argument("--kinds", nargs="+", choices=["inference", "train", "grad-check"])
+    ap.add_argument(
+        "--kinds", nargs="+", choices=["inference", "train", "train-bucketed", "grad-check"]
+    )
     ap.add_argument("--batch", nargs="+", type=int)
     ap.add_argument("--threads", nargs="+", help="e.g. 1 2 all")
     ap.add_argument("--repeats", type=int)

@@ -14,7 +14,7 @@ python -m unimol_accel.bench --preset quick --output /tmp/b        # end-to-end 
 python -m unimol_accel status                      # what is active
 ```
 
-Prerequisites: Python >= 3.10, `torch>=2.1`, `unimol-tools`. Verified against `unimol_tools` 0.1.6 (PyPI) and the Uni-Mol repository at commit `90f52c4` (0.1.3.post1).
+Prerequisites: Python >= 3.11, `torch>=2.1`, `unimol-tools`. Verified against `unimol_tools` 0.1.6 (PyPI) and the Uni-Mol repository at commit `90f52c4` (0.1.3.post1).
 
 ## Architecture in one paragraph
 
@@ -23,7 +23,9 @@ prefix of the upstream function source is in `KNOWN_HASHES`. Three patches: `Sel
 (`baddbmm`, no clone), `TransformerEncoderWithPair.forward` (skips the tail only while the `_SKIP_TAIL` context
 variable is set), and `UniMolModel.forward` (sets `_SKIP_TAIL`, plans length buckets with `plan_buckets`, runs the
 original forward per group, and `_merge_outputs` restores the caller's order for tensors, lists and dicts). The
-bucketing wrapper falls back to the original path when the plan would not save at least 10 % of padded cost.
+bucketing wrapper falls back to the original path when the plan would not save at least `min_saving` (10 %) of padded cost.
+Training is **not** bucketed unless `UNIMOL_ACCEL_BUCKET_TRAIN=1` (dropout-mask order); the cost-model constants live in
+`CostModel` and are environment-tunable; do not describe them as fitted or optimal for run time.
 
 ## Invariants — do not break these
 

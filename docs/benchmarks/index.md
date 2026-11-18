@@ -24,13 +24,15 @@ Other scripts (`benchmarks/`): `bench_unimol.py` (direct), `sweep_batch_size.py`
 
 | kind | batch | original → accel | speed-up |
 | --- | ---: | --- | ---: |
-| inference | 8 | see report | 1.04× |
-| inference | 32 | see report | 1.68× |
-| training step | 8 | see report | 1.26× |
-| training step | 32 | see report | 1.71× |
-| gradient check (dropout off) | 8 | relative error 1.2e-11 | pass |
+| inference | 8 | see report | 1.17× |
+| inference | 32 | see report | 2.00× |
+| training step (default: not bucketed) | 8 | see report | 0.98× |
+| training step (default: not bucketed) | 32 | see report | 0.98× |
+| training step, opt-in `UNIMOL_ACCEL_BUCKET_TRAIN=1` | 8 | see report | 1.11× |
+| training step, opt-in `UNIMOL_ACCEL_BUCKET_TRAIN=1` | 32 | see report | 1.66× |
+| gradient check (dropout off; default and opt-in training bucketing) | 8 | relative error 1.2e-11 | pass |
 
-*Noise:* this VM is shared and `quick` uses 3 repeats. An earlier identical run of the same code gave 1.22× / 1.91× / 1.01× / 1.71× for the same rows, so differences of ±20 % between runs are within noise; use `--preset standard` (5 repeats, sweeps) on your own machine.
+*Noise:* this VM is shared and `quick` uses 3 repeats. Earlier runs of the same code gave 1.04–1.22× / 1.68–1.91× for inference (batch 8 / 32) and 0.95–1.11× (default) / 1.66–1.79× (opt-in) for training at batch 32, so differences of ±20 % between runs are within noise; use `--preset standard` (5 repeats, sweeps) on your own machine.
 
 ```{raw} html
 <p><a href="../_static/report-sandbox-2vcpu.html">Open the full HTML report (sandbox, 2 vCPU)</a></p>

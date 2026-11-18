@@ -13,3 +13,6 @@ unimol_accel_bench/
 .venv/
 venv/
 .DS_Store
+
+# unimol_tools writes run logs here
+logs/

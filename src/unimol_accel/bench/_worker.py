@@ -66,24 +66,35 @@ def main() -> int:
 
     kind = cfg["kind"]
     if kind == "grad-check":
+        import os
+
         _no_dropout(model)
-        grads = []
-        for enable in (False, True):
+
+        def grads_of(enable):
             (ua.enable if enable else ua.disable)()
             model.train()
             model.zero_grad()
             model(**batch).float().pow(2).sum().backward()
-            grads.append(
-                torch.cat(
-                    [p.grad.flatten() for p in model.parameters() if p.grad is not None]
-                ).clone()
-            )
-        err = float((grads[1] - grads[0]).norm() / grads[0].norm())
-        out.update(rel_error=err, tolerance=1e-4, passed=err < 1e-4)
+            return torch.cat(
+                [p.grad.flatten() for p in model.parameters() if p.grad is not None]
+            ).clone()
+
+        ref = grads_of(False)
+        errs = {}
+        for label, flag in (("default", "0"), ("train_bucketing", "1")):
+            os.environ["UNIMOL_ACCEL_BUCKET_TRAIN"] = flag
+            errs[label] = float((grads_of(True) - ref).norm() / ref.norm())
+        err = max(errs.values())
+        out.update(rel_error=err, rel_error_by_mode=errs, tolerance=1e-4, passed=err < 1e-4)
         print("RESULT " + json.dumps(out))
         return 0
 
     fn = infer if kind == "inference" else train
+    if kind == "train-bucketed":
+        # opt-in mode: bucketing in training changes dropout-mask grouping (see README)
+        import os
+
+        os.environ["UNIMOL_ACCEL_BUCKET_TRAIN"] = "1"
     ua.disable()
     ref = fn()
     ua.enable()

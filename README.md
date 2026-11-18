@@ -4,7 +4,7 @@
 <a href="https://github.com/scbirlab/unimol-accel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/scbirlab/unimol-accel/actions/workflows/ci.yml/badge.svg"></a>
 <a href="https://scbirlab.github.io/unimol-accel/"><img alt="Docs" src="https://img.shields.io/badge/docs-GitHub%20Pages-blue"></a>
 <a href="https://scbirlab.github.io/unimol-accel/benchmarks/report/"><img alt="Benchmarks" src="https://img.shields.io/badge/benchmarks-live%20report-informational"></a>
-<img alt="Python" src="https://img.shields.io/badge/python-3.10%E2%80%933.14-blue">
+<img alt="Python" src="https://img.shields.io/badge/python-3.11%E2%80%933.14-blue">
 <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
@@ -41,15 +41,17 @@ Both Aspect input modes go through the same patched `UniMolModel.forward`: pre-g
 
 Each patch is guarded by a hash of the upstream source. **Verified against:** `unimol_tools` 0.1.6 (PyPI) and Uni-Mol repo commit `90f52c4` (0.1.3.post1). Anything else keeps the original code and `status()` says why. Outputs of both known `UniMolModel.forward` shapes are handled (a bare `cls_repr` tensor in ≥ 0.1.6, a dict in older versions, plus atomic representations).
 
-Switches: `UNIMOL_ACCEL_BUCKET=0` (no bucketing), `UNIMOL_ACCEL_BUCKET_TRAIN=0` (none in training), `UNIMOL_ACCEL_BUCKET_MIN_BATCH` (default 8).
+Switches: `UNIMOL_ACCEL_BUCKET=0` (no bucketing), `UNIMOL_ACCEL_BUCKET_MIN_BATCH` (default 8), `UNIMOL_ACCEL_BUCKET_TRAIN=1` (**opt-in** bucketing in training), and the cost-model constants `UNIMOL_ACCEL_COST_PAIR`, `UNIMOL_ACCEL_COST_GROUP`, `UNIMOL_ACCEL_COST_MIN_GROUP`, `UNIMOL_ACCEL_COST_MIN_SAVING` (see below).
 
-**Training note.** Bucketing is on in training. Gradients match the original (tested with dropout off), but dropout masks are drawn per sub-batch, so runs are not bitwise reproducible against the unpatched model under the same seed.
+**Training and reproducibility.** Bucketing is **off in training by default**. In training the batch runs as one unsplit forward, so with the same seed and weights the dropout masks are drawn in the same order as in the original (tested: seeded outputs match; gradients match with dropout off). The lean attention is float-rounding-identical, not bitwise-guaranteed across all builds. The price is that training gets little or no speed-up by default (0.95–1.11× at batch 8/32 across three runs on the 2-vCPU test VM). With `UNIMOL_ACCEL_BUCKET_TRAIN=1` training is bucketed (1.66–1.79× at batch 32 there, 0.97–1.11× at batch 8), but dropout masks are then drawn per sub-batch, so **identical seeds and initial weights will not give identical training trajectories**, and no model-quality comparison (does a model trained this way reach the same accuracy?) has been run. Treat it as an experiment until you have checked that on your own data.
+
+**Cost model.** The partition is optimal for `cost(group) = n·(L + L²/16) + 48·L` (L = longest member), a heuristic, not measured run time. `benchmarks/calibrate_cost_model.py` fits the pair weight and measures the per-group overhead on your machine and prints the environment variables to apply; `benchmarks/cost_model_sensitivity.py` times alternatives on several length distributions. On the 2-vCPU test VM the fitted pair weight (≈0.053–0.056) is near the default 1/16, per-group overhead measured small (a regression cannot identify it: it fits to 0 and then over-splits), and constants changed results by less than the run-to-run noise (±20 %) on some distributions and by much more (group overhead 150: ≈4× → ≈2.5× on a long-tailed batch; zero overhead over-splits narrow batches) on others; the shipped `48` is a conservative guard against over-splitting, not a fitted value. Other CPUs, batch compositions and length distributions have not been calibrated.
 
 ## Measured results — read the second table before the first
 
 Hardware: **2 vCPU cloud VM (Intel Xeon @ 2.3 GHz), 7 GB RAM**, PyTorch 2.15.0, random weights, 50 drug-like molecules (token length 17–78). Interleaved runs, medians. Not generalisable to other machines.
 
-**Same batch size, original vs accel (batch of 32):** inference 1778 → 865 ms (**2.06×**), training step 6790 → 3980 ms (**1.71×**).
+**Same batch size, original vs accel (batch of 32):** inference 1778 → 865 ms (**2.06×**); training step 6790 → 3980 ms (**1.71×**) *with the opt-in `UNIMOL_ACCEL_BUCKET_TRAIN=1`* (≈1.0–1.1× by default). These two figures come from an earlier run; the latest `quick` report is in the benchmark docs and differs by run-to-run noise (about ±20 %).
 
 **But the original is already fast at small batches.** ms per molecule, inference, 48 molecules:
 
@@ -78,7 +80,7 @@ Run-to-run noise on this shared VM was ±10–15 %.
 
 ```bash
 pip install -e .[test]            # plus: pip install "aspect-data[unimol]" for tests/integration
-pytest tests                       # 23 tests: outputs, atomic reprs, gradients, idempotence, hash guard, Aspect (both input modes)
+pytest tests                       # outputs, atomic reprs, gradients (default and opt-in training bucketing), seeded dropout, planner optimality, hash guard, Aspect (both input modes)
 python benchmarks/bench_unimol.py --batch 32 --repeats 5 [--device cuda] [--json out.json]
 python benchmarks/sweep_batch_size.py
 python benchmarks/bench_aspect.py --n 48 --batch-size 8 --batch-size 32
@@ -105,6 +107,6 @@ Each configuration runs in a fresh subprocess with a timeout and a global time b
   build with `pip install -e ".[docs]" && sphinx-build -W -b html docs docs/_build/html`. It builds warning-free here; publishing to
   GitHub Pages is done by `.github/workflows/docs.yml` once the owner enables Pages.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md).
-- CI (`.github/workflows/ci.yml`, `docs.yml`): lint, Python 3.10-3.14 matrix (+ non-blocking 3.15), an upstream-`main` canary, Aspect integration, macOS/Windows/arm,
+- CI (`.github/workflows/ci.yml`, `docs.yml`): lint, Python 3.11-3.14 matrix (+ non-blocking 3.15), an upstream-`main` canary, Aspect integration, macOS/Windows/arm,
   packaging, and a multi-runner benchmark report. **These workflows have been linted with actionlint but not run**: this repository was
   prepared read-only and nothing has been pushed. Locally everything was run on Python 3.13 only.
