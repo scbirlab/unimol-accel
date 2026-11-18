@@ -152,7 +152,7 @@ jobs:
           path: site
       - id: deployment
         if: steps.pages.outputs.enabled == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages-${{ github.run_attempt }}
       # Make the job (and therefore the workflow) red, with the explanation above, when Pages is off.
